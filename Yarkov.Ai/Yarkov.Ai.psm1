@@ -7,15 +7,18 @@ Specifies root directory from which files should be concatenated.
 Specifies wildcard rules for searching files to concatenate.
 .PARAMETER Exclude
 Specifies wildcard rules for files that should not be concatenated.
+.PARAMETER Secrets
+Specifies strings that are considered secret and therefore should be masked.
 .EXAMPLE
-Get-ConcatenateFiles -Path . *.cs,*.js wwwroot,bin,obj,*.cs
+Get-ConcatenateFiles -Path . -Include *.cs,*.js -Exclude wwwroot,bin,obj,*.cs -Secrets CompanyName1,CompanyName2
 #>
 function Get-ConcatenateFiles
 {
   param(
     [Parameter(Mandatory)][string[]]$Path,
     [string[]]$Include,
-    [string[]]$Exclude
+    [string[]]$Exclude,
+    [string[]]$Secrets
   )
 
   if ($null -eq $Include) {
@@ -25,7 +28,13 @@ function Get-ConcatenateFiles
     $Exclude = "*.dll";
   }
   
-  Get-ChildItem -File -Path $Path -Include $Include -Exclude $Exclude -Recurse | % {"Content of file ""$($_.FullName)"" starts here.";Get-Content $_ -Encoding utf8;"Content of file ""$($_.FullName)"" ends here.";}
+  $SecretReplacements = Get-SecretReplacements $Secrets;
+
+  Get-ChildItem -File -Path $Path -Include $Include -Exclude $Exclude -Recurse | % {
+    "Content of file ""$($_.FullName)"" start here." | Get-MaskedContent $Secrets $SecretReplacements;
+    Get-Content $_ -Encoding utf8 | Get-MaskedContent $Secrets $SecretReplacements;
+    "Content of file ""$($_.FullName)"" end here." | Get-MaskedContent $Secrets $SecretReplacements;
+  }
 }
 
 <#
@@ -76,10 +85,7 @@ function Get-Difference() {
 
     $CurrentFolder = (Get-Location | Get-Item).Name;
     $GitDiffFileName = $File.FullName -replace ".+\\$CurrentFolder\\", "a\"
-
-    for ($i = 0; $i -lt $Secrets.Count; $i++) {
-      $GitDiffFileName = $GitDiffFileName -replace $Secrets[$i], $SecretReplacements[$i];
-    }
+    $GitDiffFileName = $GitDiffFileName | Get-MaskedContent $Secrets $SecretReplacements;
 
   	"Contents of file ""$GitDiffFileName"" start here.";
     $FileContent = Get-Content $File -Encoding utf8;
@@ -90,9 +96,7 @@ function Get-Difference() {
     elseif ($File.Extension -eq ".json") {
       $FileContent = $FileContent -replace "(\w{$MaxBase64StringLength,}={0,2})","null";
     }
-    for ($i = 0; $i -lt $Secrets.Count; $i++) {
-      $FileContent = $FileContent -replace $Secrets[$i], $SecretReplacements[$i];
-    }
+    $FileContent = $FileContent | Get-MaskedContent $Secrets $SecretReplacements;
 
     $FileContent;
   	"Contents of file ""$GitDiffFileName"" end here.";
@@ -107,9 +111,7 @@ function Get-Difference() {
 
   $GitOutput = $GitOutput | Where-Object -FilterScript {-not ($_.Contains("ContentType=""Data""") -or $_.Contains("Type=""Image"""))};
   $GitOutput = $GitOutput -replace "(\w{$MaxBase64StringLength,}={0,2})","null";
-  for ($i = 0; $i -lt $Secrets.Count; $i++) {
-    $GitOutput = $GitOutput -replace $Secrets[$i], $SecretReplacements[$i];
-  }
+  $GitOutput = $GitOutput | Get-MaskedContent $Secrets $SecretReplacements;
   
   $GitOutput;
   "Proposed changes to the original folder ""a"" end here."
@@ -140,12 +142,12 @@ function Split-ToFiles() {
     [string]$EndDelimiter
   )
   if ('' -eq $StartDelimiter) {
-    $StartDelimiter = "Content of file ""(.+)"" starts here.";
+    $StartDelimiter = "Content of file ""(.+)"" start here.";
   }
   if ('' -eq $EndDelimiter) {
-    $EndDelimiter = "Content of file ""(.+)"" ends here.";
+    $EndDelimiter = "Content of file ""(.+)"" end here.";
   }
-
+  $ErrorActionPreference = 'Stop';
   $Content = Get-Content $Path;
   $StartIndex = 0;
   $EndIndex = 0;
@@ -215,4 +217,44 @@ function Get-SecretReplacements() {
   Write-Output $SecretReplacements;
 }
 
-Export-ModuleMember -Function Get-ConcatenateFiles, Get-Difference, Split-ToFiles;
+<#
+.SYNOPSIS
+Replace tokens (secrets) to random strings.
+.PARAMETER Secrets
+Specifies strings that are secret and therefore should be masked.
+.PARAMETER SecretsReplacements
+Specifies strings that replace secrets.
+.PARAMETER Content
+Specifies strings that are subject to masking.
+.EXAMPLE
+Get-Content C:/sample.txt | Get-MaskedContent -Secrets CompanyName1, CompanyName2 -SecretReplacements a,b
+#>
+function Get-MaskedContent {
+  param(
+    [string[]]
+    $Secrets,
+    [string[]]
+    $SecretReplacements,
+    [Parameter(ValueFromPipeline)]
+    [string]$Content
+  )
+  process {
+    if ($null -eq $Secrets) {
+      Write-Output $Content;
+      return;
+    }
+    if ($null -eq $SecretReplacements) {
+      $SecretReplacements = Get-SecretReplacements $Secrets;
+    }
+    if (-not ($SecretReplacements.Count -eq $Secrets.Count)) {
+      throw "Count of SecretReplacements should be equal to count of Secrets";
+    }
+
+    for ($i = 0; $i -lt $Secrets.Count; $i++) {
+        $Content = $Content -replace $Secrets[$i], $SecretReplacements[$i];
+    }
+    $Content;
+  }
+}
+
+Export-ModuleMember -Function Get-ConcatenateFiles, Get-Difference, Split-ToFiles, Get-SecretReplacements, Get-MaskedContent;
