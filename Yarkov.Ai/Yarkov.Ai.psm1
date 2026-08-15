@@ -35,8 +35,10 @@ Prints git difference between contents of two commits based on origin.
 Specifies origin commit.
 .PARAMETER LastCommit
 Specifies commit with changes.
+.PARAMETER Secrets
+Specifies strings that are considered secret and therefore should be masked.
 .EXAMPLE
-Get-Difference -FirstCommit 0e69a0de3e93ca73c7cc800f57df83cc4d20e2bc -SecondCommit cea17c7a0e0186d8de70307b05874a84733e8429 | Out-File diff.txt -Encoding utf8
+Get-Difference -FirstCommit 0e69a0de3e93ca73c7cc800f57df83cc4d20e2bc -SecondCommit cea17c7a0e0186d8de70307b05874a84733e8429 -Secrets CompanyName1, CompanyName2 | Out-File difference.txt -Encoding utf8
 #>
 function Get-Difference() {
   param(
@@ -129,7 +131,7 @@ Example: "Content of file ""(.+)"" starts here."
 Specifies wildcard rule for the end file delimiter. Important: delimiter should contain absolute path to a file.
 Example: "Content of file ""(.+)"" ends here."
 .EXAMPLE
-Split-ToFiles -Path E:/Project/concat.txt
+Split-ToFiles -Path E:/Project/concat.txt -StartDelimiter "Content of file ""(.+)"" starts here." -EndDelimiter "Content of file ""(.+)"" ends here."
 #>
 function Split-ToFiles() {
   param (
@@ -176,6 +178,14 @@ function Split-ToFiles() {
   }
 }
 
+<#
+.SYNOPSIS
+Returns replacements for the secrets.
+.PARAMETER Secrets
+Specifies strings that are secret and therefore should be masked.
+.EXAMPLE
+Get-SecretReplacements -Secrets CompanyName1, CompanyName2
+#>
 function Get-SecretReplacements() {
   param (
     [string[]]
@@ -205,4 +215,4 @@ function Get-SecretReplacements() {
   Write-Output $SecretReplacements;
 }
 
-Export-ModuleMember -Function Get-ConcatenateFiles, Get-Difference, Split-ToFiles, Get-Difference2;
+Export-ModuleMember -Function Get-ConcatenateFiles, Get-Difference, Split-ToFiles;
