@@ -255,5 +255,3 @@ function Restart-BpmPool {
     Restart-WebAppPool -Name $((Get-Website $AppName).applicationPool);
   }
 }
-
-Export-ModuleMember -Function New-BpmApp, Update-BpmConnectionString, Invoke-BpmDockerDbRestore, Invoke-BpmDbRestore, New-BpmSite, Restart-BpmPool;
