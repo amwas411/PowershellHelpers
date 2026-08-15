@@ -19,7 +19,7 @@ function Get-ConcatenateFiles
   )
 
   if ($null -eq $Include) {
-    $Include = "*.cs","*.js","*.sql";
+    $Include = "*.cs","*.js","*.sql","*.ts";
   }
   if ($null -eq $Exclude) {
     $Exclude = "*.dll";
@@ -41,24 +41,26 @@ Get-Difference -FirstCommit 0e69a0de3e93ca73c7cc800f57df83cc4d20e2bc -SecondComm
 function Get-Difference() {
   param(
     [Parameter(Mandatory)][string]$FirstCommit,
-    [Parameter(Mandatory)][string]$LastCommit
+    [Parameter(Mandatory)][string]$LastCommit,
+    [string[]]$Secrets
   )
 	$MaxBase64StringLength = 500;
   if ($FirstCommit -eq $LastCommit) {
     throw "First commit can not be equal to the last";
   }
 
+  $SecretReplacements = Get-SecretReplacements $Secrets;
+
   $GitOutput = git checkout $FirstCommit 2>&1;
-  if (-not $?) {
-    if ($GitOutput.Exception.Message.Count -gt 1 -and -not $GitOutput.Exception.Message[0].Contains("HEAD")) {
-      throw $GitOutput;
-    }
+  if (-not $? -and $GitOutput.Exception.Message.Contains("error")) {
+    throw $GitOutput;
   }
 
   $GitOutput = git diff $FirstCommit $LastCommit --name-only 2>&1;
   if (-not $?) {
-	throw $GitOutput;
+	  throw $GitOutput;
   }
+
   "Contents of the original folder ""a"" start here."
   foreach ($fileName in $GitOutput) {
   	$File = Get-Item $fileName -ErrorAction Ignore;
@@ -70,29 +72,50 @@ function Get-Difference() {
       continue;
     }
 
-    $GitDiffFileName = $File.FullName -replace "(.+)(?=\\Pkg\\)", "a"
+    $CurrentFolder = (Get-Location | Get-Item).Name;
+    $GitDiffFileName = $File.FullName -replace ".+\\$CurrentFolder\\", "a\"
+
+    for ($i = 0; $i -lt $Secrets.Count; $i++) {
+      $GitDiffFileName = $GitDiffFileName -replace $Secrets[$i], $SecretReplacements[$i];
+    }
+
   	"Contents of file ""$GitDiffFileName"" start here.";
     $FileContent = Get-Content $File -Encoding utf8;
+
     if ($File.Extension -eq ".xml") {
       $FileContent = $FileContent | Where-Object -FilterScript {-not ($_.Contains("ContentType=""Data""") -or $_.Contains("Type=""Image"""))};
     }
     elseif ($File.Extension -eq ".json") {
       $FileContent = $FileContent -replace "(\w{$MaxBase64StringLength,}={0,2})","null";
     }
+    for ($i = 0; $i -lt $Secrets.Count; $i++) {
+      $FileContent = $FileContent -replace $Secrets[$i], $SecretReplacements[$i];
+    }
+
     $FileContent;
   	"Contents of file ""$GitDiffFileName"" end here.";
   }
   "Contents of the original folder ""a"" end here."
 
   "Proposed changes to the original folder ""a"" start here."
-   $GitOutput = git diff $FirstCommit $LastCommit 2>&1;
+  $GitOutput = git diff $FirstCommit $LastCommit 2>&1;
   if (-not $?) {
-	throw $GitOutput;
+	  throw $GitOutput;
   }
+
   $GitOutput = $GitOutput | Where-Object -FilterScript {-not ($_.Contains("ContentType=""Data""") -or $_.Contains("Type=""Image"""))};
-  $GitOutput = $GitOutput  -replace "(\w{$MaxBase64StringLength,}={0,2})","null";
+  $GitOutput = $GitOutput -replace "(\w{$MaxBase64StringLength,}={0,2})","null";
+  for ($i = 0; $i -lt $Secrets.Count; $i++) {
+    $GitOutput = $GitOutput -replace $Secrets[$i], $SecretReplacements[$i];
+  }
+  
   $GitOutput;
   "Proposed changes to the original folder ""a"" end here."
+  
+  $GitOutput = git switch - 2>&1;
+  if (-not $? -and $GitOutput.Exception.Message.Contains("error")) {
+	  throw $GitOutput;
+  }
 }
 <#
 .SYNOPSIS
@@ -151,6 +174,35 @@ function Split-ToFiles() {
       }
     }
   }
+}
+
+function Get-SecretReplacements() {
+  param (
+    [string[]]
+    $Secrets
+  )
+  $Alphabet = @("a","b","c","d","e","f","g","h","i","j","k");
+  $SecretReplacements = @();
+  if ($null -eq $Secrets)
+  {
+    Write-Output $SecretReplacements;
+    return;
+  }
+  for ($i = 0; $i -lt $Secrets.Count; ++$i) 
+  {
+    $Replacement = "";
+    $Number = Get-Random -SetSeed $i;
+    $j = 0;
+    while ($Number -ne 0) 
+    {
+      $R = $Number % 10;
+      $Replacement += $Alphabet[$R];
+      $Number = [Math]::Floor($Number / 10);
+      ++$j;
+    } 
+    $SecretReplacements += $Replacement;
+  }
+  Write-Output $SecretReplacements;
 }
 
 Export-ModuleMember -Function Get-ConcatenateFiles, Get-Difference, Split-ToFiles, Get-Difference2;
